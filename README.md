@@ -5,23 +5,32 @@ Telegram-бот простым языком объясняет, как неко�
 а не обвинение конкретных компаний.
 
 ## Что умеет
+
 - `/start`, `/help`, `/menu` — меню из 8 признаков риска и памятка безопасности.
 - Инлайн-кнопки: разбор каждого механизма + «Памятка безопасности».
 - Лёгкая статистика в SQLite (сколько людей, сколько обращений) — без персональных данных, только id и счётчики.
 - Health-эндпоинт `GET http://127.0.0.1:<health_port>/` → JSON со статусом, аптаймом и статистикой.
 
 ## Настройка
+
 Рядом с `bot.py` — `config.json` (в GitHub не попадает):
 
 ```json
-{ "token": "<токен BotFather>", "expected_username": "MagnitWaveBot", "database": "magnit.sqlite3", "health_port": 8769 }
+{
+  "token": "<токен BotFather>",
+  "expected_username": "MagnitWaveBot",
+  "database": "magnit.sqlite3",
+  "health_port": 8769
+}
 ```
 
 Любое значение переопределяется окружением: `TELEGRAM_BOT_TOKEN`, `EXPECTED_USERNAME`, `DATABASE`, `HEALTH_PORT`.
 При старте бот сверяет имя из токена с `expected_username` и предупреждает, если не совпало.
 
 ## Запуск
+
 ```bash
 python3 bot.py
 ```
+
 Только стандартная библиотека Python 3, зависимостей нет. Токен в логи и тексты ошибок не пишется.
