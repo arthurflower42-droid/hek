@@ -24,9 +24,9 @@ LOG = logging.getLogger('magnit')
 COINS = {'BTC': 'bitcoin', 'ETH': 'ethereum', 'SOL': 'solana', 'TON': 'the-open-network'}
 FEEDS = {'world': [('BBC', 'https://feeds.bbci.co.uk/russian/rss.xml')],
          'crypto': [('ForkLog', 'https://forklog.com/feed/')]}
-COMMANDS = [('start', 'Главная'), ('crypto', 'Курсы криптовалют'), ('news', 'Новости с источниками'),
-            ('music', 'Поиск музыки'), ('settings', 'Мои настройки'), ('ai', 'AI-помощник'),
-            ('privacy', 'Данные и приватность'), ('forget', 'Удалить мои настройки')]
+COMMANDS = [('start', 'Главная'), ('portfolio', 'Мой портфель'), ('crypto', 'Курсы криптовалют'),
+            ('news', 'Новости с источниками'), ('music', 'Поиск музыки'), ('settings', 'Мои настройки'),
+            ('ai', 'AI-помощник'), ('privacy', 'Данные и приватность'), ('forget', 'Удалить мои настройки')]
 
 def clean(value, limit=350):
     return html.escape(re.sub('<[^>]*>', '', html.unescape(str(value))).strip()[:limit])
@@ -72,7 +72,9 @@ class Store:
             topic TEXT NOT NULL DEFAULT 'world');
             CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
             CREATE TABLE IF NOT EXISTS usage(user INTEGER, day TEXT, count INTEGER,
-                PRIMARY KEY(user,day));''')
+                PRIMARY KEY(user,day));
+            CREATE TABLE IF NOT EXISTS holdings(user INTEGER, coin TEXT NOT NULL,
+                amount REAL NOT NULL, PRIMARY KEY(user,coin));''')
         self.db.commit()
     def user(self, uid):
         self.db.execute('INSERT OR IGNORE INTO users(id) VALUES (?)', (uid,))
@@ -90,6 +92,7 @@ class Store:
     def forget(self, uid):
         self.db.execute('DELETE FROM users WHERE id=?', (uid,))
         self.db.execute('DELETE FROM usage WHERE user=?', (uid,))
+        self.db.execute('DELETE FROM holdings WHERE user=?', (uid,))
         self.db.commit()
     def quota(self, uid, limit):
         today = dt.datetime.now(dt.timezone.utc).date().isoformat()
@@ -101,6 +104,15 @@ class Store:
         self.db.execute('INSERT INTO usage VALUES(?,?,1) ON CONFLICT(user,day) DO UPDATE SET count=count+1', (uid,today))
         self.db.commit()
         return True
+    def holdings(self, uid):
+        return {coin: amount for coin, amount in
+                self.db.execute('SELECT coin,amount FROM holdings WHERE user=?', (uid,))}
+    def add_holding(self, uid, coin, amount):
+        self.db.execute('INSERT INTO holdings VALUES(?,?,?) ON CONFLICT(user,coin) DO UPDATE SET amount=amount+?', (uid,coin,amount,amount))
+        self.db.commit()
+    def remove_holding(self, uid, coin):
+        self.db.execute('DELETE FROM holdings WHERE user=? AND coin=?', (uid,coin))
+        self.db.commit()
     def offset(self, value=None):
         if value is not None:
             self.db.execute("INSERT OR REPLACE INTO meta VALUES('offset',?)", (str(value),))
@@ -125,8 +137,8 @@ class Bot:
     def menu(self):
         return {'inline_keyboard': [
             [{'text': '◈ Крипта', 'callback_data': 'crypto'}, {'text': '◉ Новости', 'callback_data': 'news'}],
-            [{'text': '♫ Музыка', 'callback_data': 'music'}, {'text': '✦ AI', 'callback_data': 'ai'}],
-            [{'text': '⚙ Настройки', 'callback_data': 'settings'}]]}
+            [{'text': '◆ Портфель', 'callback_data': 'portfolio'}, {'text': '♫ Музыка', 'callback_data': 'music'}],
+            [{'text': '✦ AI', 'callback_data': 'ai'}, {'text': '⚙ Настройки', 'callback_data': 'settings'}]]}
     def send(self, chat, text, markup=None):
         if len(text.encode('utf-16-le'))//2 > 3900:
             text = html.unescape(re.sub('<[^>]*>', '', text))[:1800]
@@ -144,12 +156,14 @@ class Bot:
             self.cache.clear()
         self.cache[key] = (now, value)
         return value
-    def crypto(self, prefs):
-        currency = prefs['currency']
+    def prices(self, currency):
         query = urllib.parse.urlencode({'ids': ','.join(COINS.values()), 'vs_currencies': currency,
             'include_24hr_change': 'true', 'include_last_updated_at': 'true'})
         base = self.cfg.get('price_base', 'https://api.coingecko.com/api/v3/simple/price')
-        data = self.cached('price:'+currency, 90, lambda: self.http.request(base+'?'+query))
+        return self.cached('price:'+currency, 90, lambda: self.http.request(base+'?'+query))
+    def crypto(self, prefs):
+        currency = prefs['currency']
+        data = self.prices(currency)
         lines = ['<b>◈ Рынок · '+currency.upper()+'</b>']
         stamps = []
         for symbol, coin in COINS.items():
@@ -170,6 +184,49 @@ class Bot:
         lines += ['', 'CoinGecko · '+when]
         if time.time()-oldest > 600:
             lines.append('⚠ Данные источника старше 10 минут.')
+        return '\n'.join(lines)
+    def portfolio(self, uid, prefs, arg):
+        currency = prefs['currency']
+        parts = arg.split()
+        holdings = self.store.holdings(uid)
+        if len(parts) >= 3 and parts[0].lower() in ('add','плюс','добавить'):
+            coin = parts[1].upper()
+            try:
+                amount = float(parts[2].replace(',', '.'))
+            except ValueError:
+                amount = -1
+            if coin not in COINS or not (math.isfinite(amount) and amount > 0):
+                return 'Формат: <code>/portfolio add BTC 0.5</code>\nМонеты: '+', '.join(COINS)
+            self.store.add_holding(uid, coin, amount)
+            holdings = self.store.holdings(uid)
+        elif len(parts) >= 2 and parts[0].lower() in ('del','remove','минус','убрать'):
+            coin = parts[1].upper()
+            if coin not in holdings:
+                return f'{coin} нет в твоём портфеле.'
+            self.store.remove_holding(uid, coin)
+            holdings = self.store.holdings(uid)
+        if not holdings:
+            return ('<b>◆ Портфель пуст</b>\nЭто твой личный трекер: ты вносишь уже принадлежащие тебе монеты, '
+                    'я показываю их рыночную стоимость по живым ценам CoinGecko.\n\n'
+                    '<code>/portfolio add BTC 0.5</code> — добавить\n<code>/portfolio del BTC</code> — убрать')
+        data = self.prices(currency)
+        lines = ['<b>◆ Портфель · '+currency.upper()+'</b>', '']
+        total, stamp = 0.0, 0
+        for coin, amount in sorted(holdings.items()):
+            item = data.get(COINS.get(coin, ''), {})
+            price = item.get(currency)
+            if not isinstance(price, (int, float)) or not math.isfinite(price):
+                lines.append(f'  {coin}  {amount:g} · нет данных')
+                continue
+            value = amount * price
+            total += value
+            lines.append(f'  <b>{coin}</b>  {amount:g} ≈ {value:,.2f} {currency.upper()}')
+            if isinstance(item.get('last_updated_at'), (int, float)):
+                stamp = max(stamp, item['last_updated_at'])
+        lines += ['', f'<b>Итого ≈ {total:,.2f} {currency.upper()}</b>']
+        if stamp:
+            lines += ['', 'CoinGecko · '+dt.datetime.fromtimestamp(stamp, dt.timezone.utc).strftime('%d.%m %H:%M UTC')]
+        lines += ['', '<code>/portfolio add BTC 0.5</code> · <code>/portfolio del BTC</code>']
         return '\n'.join(lines)
     def feed(self, source):
         name, url = source
@@ -253,7 +310,7 @@ class Bot:
         command = command.lstrip('/').split('@')[0].lower()
         if command=='forget':
             self.store.forget(uid)
-            self.send(chat,'Твои настройки и счётчик AI удалены. При следующем обращении начнём заново.')
+            self.send(chat,'Твои настройки, портфель и счётчик AI удалены. При следующем обращении начнём заново.')
             return
         prefs = self.store.user(uid)
         if ':' in command:
@@ -265,7 +322,16 @@ class Bot:
             return
         try:
             if command in ('start','help'):
-                text = '<b>МАГНИТ</b>\nКрипта · Новости · Музыка\n\nТвой ежедневный навигатор. Выбирай раздел ниже.\n\nКурсы с отметкой времени, новости с первоисточниками и музыка по твоему запросу.\n\n<code>/privacy</code> · о данных'
+                text = ('<b>◆ МАГНИТ</b>\n'
+                        '<i>Крипта · Новости · Музыка · Портфель</i>\n\n'
+                        'Твой ежедневный навигатор:\n'
+                        '◈ <b>Крипта</b> — живые курсы с отметкой времени\n'
+                        '◆ <b>Портфель</b> — стоимость твоих монет по рыночным ценам\n'
+                        '◉ <b>Новости</b> — только с первоисточниками\n'
+                        '♫ <b>Музыка</b> и ✦ <b>AI</b>\n\n'
+                        'Выбирай раздел ниже.\n<code>/privacy</code> · о данных')
+            elif command=='portfolio':
+                text = self.portfolio(uid, prefs, arg.strip())
             elif command=='crypto':
                 text = self.crypto(prefs)
             elif command=='news':
@@ -279,9 +345,9 @@ class Bot:
                 self.send(chat,text,markup)
                 return
             elif command=='privacy':
-                text = 'Храним Telegram ID, валюту, тему новостей и дневной счётчик AI. Тексты сообщений в базе не сохраняем.\n\nЗапросы /music отправляются Apple, /ai отправляются OpenAI, если AI подключён.\n\nУдалить настройки: /forget'
+                text = 'Храним Telegram ID, валюту, тему новостей, состав портфеля и дневной счётчик AI. Тексты сообщений в базе не сохраняем.\n\nЗапросы /music отправляются Apple, /ai отправляются OpenAI, если AI подключён.\n\nУдалить настройки: /forget'
             else:
-                text = 'Выбери раздел ниже. Для поиска музыки: <code>/music название</code>. Для AI: <code>/ai вопрос</code>.'
+                text = 'Выбери раздел ниже. Портфель: <code>/portfolio add BTC 0.5</code>. Музыка: <code>/music название</code>. AI: <code>/ai вопрос</code>.'
         except (UpstreamError, ET.ParseError, KeyError, TypeError, ValueError):
             LOG.warning('content_unavailable command=%s', command if command in dict(COMMANDS) else 'other')
             text = 'Источник сейчас недоступен. Попробуй чуть позже или открой другой раздел. Выдуманные данные я не показываю.'
@@ -294,8 +360,8 @@ class Bot:
         if webhook.get('url'):
             raise RuntimeError('Existing webhook found; installation stopped without changing it')
         self.api('setMyCommands', {'commands':[{'command':k,'description':v} for k,v in COMMANDS]})
-        self.api('setMyDescription', {'description':'МАГНИТ: курсы криптовалют, новости с источниками, поиск музыки и AI-помощник. Начни с /start.'})
-        self.api('setMyShortDescription', {'short_description':'Крипта · Новости · Музыка. Твой ежедневный навигатор.'})
+        self.api('setMyDescription', {'description':'МАГНИТ: курсы криптовалют, портфель по живым ценам, новости с источниками, музыка и AI-помощник.'})
+        self.api('setMyShortDescription', {'short_description':'Крипта · Портфель · Новости · Музыка. Твой ежедневный навигатор.'})
     def poll(self):
         updates = self.api('getUpdates', {'offset':self.store.offset(), 'timeout':30, 'allowed_updates':['message','callback_query']}, timeout=40)
         self.last_poll = time.monotonic()
