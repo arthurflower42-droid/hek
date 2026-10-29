@@ -322,14 +322,22 @@ class Bot:
             return
         try:
             if command in ('start','help'):
-                text = ('<b>◆ МАГНИТ</b>\n'
+                text = ('<b>◆◆◆ ДОБРО ПОЖАЛОВАТЬ В МАГНИТ ◆◆◆</b>\n'
                         '<i>Крипта · Новости · Музыка · Портфель</i>\n\n'
-                        'Твой ежедневный навигатор:\n'
-                        '◈ <b>Крипта</b> — живые курсы с отметкой времени\n'
-                        '◆ <b>Портфель</b> — стоимость твоих монет по рыночным ценам\n'
-                        '◉ <b>Новости</b> — только с первоисточниками\n'
-                        '♫ <b>Музыка</b> и ✦ <b>AI</b>\n\n'
-                        'Выбирай раздел ниже.\n<code>/privacy</code> · о данных')
+                        '🎉 Ты в международном сообществе, где всё по-честному:\n'
+                        'ни фейковых балансов, ни «оценочного дохода».\n\n'
+                        '<b>◈ Крипта</b> — живые курсы с отметкой времени\n'
+                        '<b>◆ Портфель</b> — твои реальные монеты по рыночным ценам\n'
+                        '<b>◉ Новости</b> — только с первоисточниками\n'
+                        '<b>♫ Музыка</b> и <b>✦ AI</b>\n\n'
+                        'Выбирай раздел ниже.\n'
+                        '<code>/privacy</code> — о данных · <code>/about</code> — о боте')
+            elif command=='about':
+                text = ('<b>◆ О МАГНИТЕ</b>\n\n'
+                        'МАГНИТ — проект Артура. Это навигатор по рынку: курсы берутся у CoinGecko, '
+                        'новости — у BBC и ForkLog, музыка — у Apple Music. '
+                        'Бот не принимает деньги, не обещает доходность и не торгует за тебя.\n\n'
+                        '<b>Презентация</b> = этот текст. Никаких «бизнес-моделей» — только полезные функции.')
             elif command=='portfolio':
                 text = self.portfolio(uid, prefs, arg.strip())
             elif command=='crypto':
@@ -401,7 +409,7 @@ def serve_health(bot, port):
             self.send_header('Content-Type','application/json')
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
-        def log_message(self,*args):
+        def log_message(*args):
             pass
     server = ThreadingHTTPServer(('127.0.0.1',port),Handler)
     threading.Thread(target=server.serve_forever,daemon=True).start()
