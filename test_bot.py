@@ -1,7 +1,4 @@
 import json
-import os
-from pathlib import Path
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -9,6 +6,7 @@ import threading
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from unittest.mock import patch
 import bot
 
@@ -37,41 +35,6 @@ class Harness(unittest.TestCase):
                     value = {"message_id": 12}
                 self.respond({"ok": True, "result": value})
 
-            def do_GET(self):
-                if self.path.startswith("/price"):
-                    data = {
-                        v: {
-                            "usd": 123.45,
-                            "rub": 10000,
-                            "eur": 110,
-                            "usd_24h_change": 2.5,
-                            "last_updated_at": int(time.time()),
-                        }
-                        for v in bot.COINS.values()
-                    }
-                    self.respond(data)
-                elif self.path.startswith("/music"):
-                    self.respond(
-                        {
-                            "results": [
-                                {
-                                    "artistName": "A & B",
-                                    "trackName": "Track",
-                                    "trackViewUrl": "https://music.apple.com/us/song/test/1",
-                                },
-                                {
-                                    "artistName": "bad",
-                                    "trackViewUrl": "javascript:alert(1)",
-                                },
-                            ]
-                        }
-                    )
-                else:
-                    body = b"<rss><channel><item><title>News &amp; test</title><link>https://example.com/news</link><pubDate>Thu, 29 Oct 2026 10:00:00 GMT</pubDate></item></channel></rss>"
-                    self.send_response(200)
-                    self.end_headers()
-                    self.wfile.write(body)
-
             def respond(self, data):
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -89,12 +52,6 @@ class Harness(unittest.TestCase):
             "token": "fixture",
             "database": self.tmp.name + "/db.sqlite",
             "telegram_base": base,
-            "price_base": base + "/price",
-            "music_base": base + "/music",
-            "feeds": {
-                "world": [["Fixture", base + "/rss"]],
-                "crypto": [["Fixture", base + "/rss"]],
-            },
         }
         self.b = bot.Bot(self.config)
 
@@ -120,12 +77,9 @@ class Harness(unittest.TestCase):
         return [d for m, d in self.calls if m == "sendMessage"][-1]
 
     def test_incoming_update_subprocess(self):
-        # Actual process -> HTTP getUpdates -> dispatcher -> HTTP sendMessage -> durable cursor.
         self.updates = [
             self.update("/start"),
-            dict(self.update("/crypto", 11), update_id=2),
-            dict(self.update("/news", 12), update_id=3),
-            dict(self.update("/music test", 13), update_id=4),
+            dict(self.update("/dashboard", 11), update_id=2),
         ]
         config = Path(self.tmp.name) / "config.json"
         config.write_text(json.dumps(self.config))
@@ -142,28 +96,31 @@ class Harness(unittest.TestCase):
         )
         self.assertEqual(p.returncode, 0, p.stderr.decode())
         messages = [d["text"] for m, d in self.calls if m == "sendMessage"]
-        self.assertEqual(len(messages), 4)
-        self.assertIn("МАГНИТ", messages[0])
-        self.assertIn("BTC", messages[1])
-        self.assertIn("News", messages[2])
-        self.assertIn("A &amp; B", messages[3])
-        self.assertEqual(self.b.store.offset(), 5)
+        self.assertEqual(len(messages), 2)
+        self.assertIn("Digital Algorithms", messages[0])
+        self.assertIn("0.00 USDT", messages[1])
+        self.assertEqual(self.b.store.offset(), 3)
 
-    def test_preferences_survive_reopen(self):
-        self.b.store.setting(10, "currency", "rub")
-        self.b.store.db.close()
-        self.b.store = bot.Store(self.config["database"])
-        self.assertEqual(self.b.store.user(10)["currency"], "rub")
-        self.assertFalse(self.b.store.setting(10, "currency", "invalid"))
+    def test_welcome_text(self):
+        text = self.send("/start")["text"]
+        self.assertIn("Welcome to Digital Algorithms!", text)
+        self.assertIn("Australian technology company", text)
 
-    def test_callback_uses_sender_and_ack(self):
+    def test_dashboard_zero_balances(self):
+        text = self.send("/dashboard")["text"]
+        for line in ("Total:", "Available:", "In deposits:", "Estimated income:"):
+            self.assertIn(line, text)
+        self.assertEqual(text.count("0.00 USDT"), 4)
+        self.assertIn("Демо-режим", text)
+
+    def test_callback_dashboard(self):
         self.b.handle(
             {
                 "update_id": 2,
                 "callback_query": {
                     "id": "click",
                     "from": {"id": 10},
-                    "data": "currency:eur",
+                    "data": "balance",
                     "message": {
                         "from": {"id": 99},
                         "chat": {"id": 10, "type": "private"},
@@ -172,11 +129,41 @@ class Harness(unittest.TestCase):
             }
         )
         self.assertEqual(self.calls[0][0], "answerCallbackQuery")
-        self.assertEqual(self.b.store.user(10)["currency"], "eur")
+        text = [d for m, d in self.calls if m == "sendMessage"][-1]["text"]
+        self.assertIn("0.00 USDT", text)
 
-    def test_failure_does_not_fabricate(self):
-        with patch.object(self.b, "crypto", side_effect=bot.UpstreamError(429)):
-            self.assertIn("Источник сейчас недоступен", self.send("/crypto")["text"])
+    def test_stub_sections(self):
+        for cmd in ("deposit", "topup", "withdraw", "reinvest"):
+            self.assertIn("витрина", self.send("/" + cmd)["text"])
+
+    def test_language_switch(self):
+        self.b.handle(
+            {
+                "update_id": 3,
+                "callback_query": {
+                    "id": "click",
+                    "from": {"id": 10},
+                    "data": "setlang:ru",
+                    "message": {
+                        "from": {"id": 99},
+                        "chat": {"id": 10, "type": "private"},
+                    },
+                },
+            }
+        )
+        self.assertEqual(self.b.store.language(10), "ru")
+        self.assertFalse(self.b.store.language(10, "xx"))
+
+    def test_group_ignored(self):
+        self.b.handle(self.update("/start", typ="group"))
+        self.assertEqual(self.calls, [])
+
+    def test_forget(self):
+        self.b.store.user(10)
+        self.send("/forget")
+        self.assertEqual(
+            self.b.store.db.execute("select count(*) from users").fetchone()[0], 0
+        )
 
     def test_cursor_not_advanced_on_send_failure(self):
         self.updates = [self.update("/start")]
@@ -191,55 +178,6 @@ class Harness(unittest.TestCase):
             with self.assertRaises(bot.UpstreamError):
                 self.b.poll()
         self.assertEqual(self.b.store.offset(), 0)
-
-    def test_forbidden_chat_skipped(self):
-        self.updates = [self.update("/start")]
-        original = self.b.api
-
-        def api(method, *a, **kw):
-            if method == "sendMessage":
-                raise bot.UpstreamError(403)
-            return original(method, *a, **kw)
-
-        with patch.object(self.b, "api", side_effect=api):
-            self.b.poll()
-        self.assertEqual(self.b.store.offset(), 2)
-
-    def test_group_ignored(self):
-        self.b.handle(self.update("/start", typ="group"))
-        self.assertEqual(self.calls, [])
-
-    def test_music_escaping_and_links(self):
-        text = self.send("/music track")["text"]
-        self.assertIn("A &amp; B", text)
-        self.assertNotIn("javascript:", text)
-
-    def test_forget(self):
-        self.b.store.user(10)
-        self.b.store.quota(10, 2)
-        self.send("/forget")
-        self.assertEqual(
-            self.b.store.db.execute("select count(*) from users").fetchone()[0], 0
-        )
-        self.assertEqual(
-            self.b.store.db.execute("select count(*) from usage").fetchone()[0], 0
-        )
-
-    def test_ai_quota_and_no_key(self):
-        self.assertIn("пока не подключён", self.send("/ai hello")["text"])
-        self.assertTrue(self.b.store.quota(10, 1))
-        self.assertFalse(self.b.store.quota(10, 1))
-
-    def test_cache_only_success(self):
-        count = []
-
-        def load():
-            count.append(1)
-            return "ok"
-
-        self.assertEqual(self.b.cached("a", 30, load), "ok")
-        self.b.cached("a", 30, load)
-        self.assertEqual(len(count), 1)
 
     def test_webhook_not_destroyed(self):
         original = self.b.api
@@ -265,21 +203,6 @@ class Harness(unittest.TestCase):
         self.assertFalse(self.b.health()["ok"])
         self.b.poll()
         self.assertTrue(self.b.health()["ok"])
-
-    def test_ai_response_and_explicit_input_only(self):
-        self.b.cfg["openai_key"] = "fixture"
-        with patch.object(
-            self.b.http,
-            "request",
-            return_value={
-                "output": [{"content": [{"type": "output_text", "text": "Ответ"}]}]
-            },
-        ) as req:
-            self.assertEqual(self.b.ai(10, "hello"), "Ответ")
-            payload = req.call_args.args[1]
-            self.assertFalse(payload["store"])
-            self.assertEqual(payload["input"], "hello")
-            self.assertNotIn("previous_response_id", payload)
 
 
 if __name__ == "__main__":
