@@ -18,4 +18,3 @@ Magnit is a fictional Telegram bot demo. It demonstrates menus, language switchi
 Python 3.10+; standard library only.
 
 Set `TELEGRAM_BOT_TOKEN` in the environment (or put a BotFather token in an untracked `config.json` beside `bot.py`), then run:
-
