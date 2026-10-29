@@ -1,10 +1,27 @@
-| Mechanism | How operators generate revenue |
-| --- | --- |
-| Reported returns | The dashboard displays gains that may not reflect actual performance, encouraging larger deposits. |
-| Deposit-funded payouts | New deposits support earlier withdrawals, creating the appearance of a profitable business. |
-| Withdrawal requirements | Users are asked to pay additional “tax,” “verification,” or “unlock” charges before withdrawing. These payments may also remain unrecovered. |
-| Fees and execution practices | Additional charges or unfavorable trade prices transfer value from customers to the operator. |
-| Referral-based recruitment | Promoters receive commissions for bringing in depositors, regardless of whether those depositors profit. |
-| Trading-volume incentives | Operators earn transaction commissions, encouraging frequent trades even when customers experience overall losses. |
-| Opposing customer positions | Some dealers profit from customer losses on positions they retain. This arrangement can be legitimate when properly regulated and disclosed; undisclosed manipulation is a separate concern. |
-| Withdrawal discontinuation | Operators collect deposits, then restrict withdrawals or discontinue operations. |
+# МАГНИТ — образовательный бот (@MagnitWaveBot)
+
+Telegram-бот простым языком объясняет, как некоторые финансовые площадки
+зарабатывают на вкладчиках и на какие признаки риска смотреть. Это просвещение,
+а не обвинение конкретных компаний.
+
+## Что умеет
+- `/start`, `/help`, `/menu` — меню из 8 признаков риска и памятка безопасности.
+- Инлайн-кнопки: разбор каждого механизма + «Памятка безопасности».
+- Лёгкая статистика в SQLite (сколько людей, сколько обращений) — без персональных данных, только id и счётчики.
+- Health-эндпоинт `GET http://127.0.0.1:<health_port>/` → JSON со статусом, аптаймом и статистикой.
+
+## Настройка
+Рядом с `bot.py` — `config.json` (в GitHub не попадает):
+
+```json
+{ "token": "<токен BotFather>", "expected_username": "MagnitWaveBot", "database": "magnit.sqlite3", "health_port": 8769 }
+```
+
+Любое значение переопределяется окружением: `TELEGRAM_BOT_TOKEN`, `EXPECTED_USERNAME`, `DATABASE`, `HEALTH_PORT`.
+При старте бот сверяет имя из токена с `expected_username` и предупреждает, если не совпало.
+
+## Запуск
+```bash
+python3 bot.py
+```
+Только стандартная библиотека Python 3, зависимостей нет. Токен в логи и тексты ошибок не пишется.
