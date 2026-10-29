@@ -29,53 +29,95 @@ API = "https://api.telegram.org/bot" + TOKEN + "/"
 STATE = {"started": time.time(), "last_update": 0, "last_poll": 0, "updates": 0, "username": "", "ok": False}
 LOCAL = threading.local()
 SEED = 10000
-PLANS = {100: "Starter", 500: "Explorer", 1000: "Strategist"}
+PLANS = {100: "🌟 Starter", 500: "🚀 Explorer", 1000: "💎 Strategist"}
 TEXT = {
  "en": {
-  "welcome": "<b>MAGNIT | PAPER TRADING DEMO</b>\n\nExplore a fictional portfolio using virtual credits. No real money, deposits, withdrawals, trading, or investment returns are involved.",
-  "menu": "Choose a demo screen:",
-  "balance": "Virtual balance", "invested": "In open demos", "portfolio": "Portfolio",
-  "plans": "<b>Choose a demo size</b>\n\nOpening a demo position moves virtual credits into your portfolio. It does not place a real trade.",
-  "opened": "Demo position opened: <b>{plan}</b> for {amount:,} credits. No real trade was placed.",
-  "insufficient": "Not enough virtual credits. Close an open demo position first.",
-  "empty": "No open demo positions yet. Choose a demo size to create one.",
-  "portfolio_title": "<b>Your demo portfolio</b>",
-  "history_title": "<b>Demo activity</b>",
-  "closed": "Closed demo position #{id} with a hypothetical {pct:+d}% scenario. Virtual change: {change:+,} credits.",
-  "risk": "<b>Risk notes</b>\n\n• Markets can move against you, including loss of the full amount.\n• Past results do not predict future results.\n• This bot uses invented demo data and makes no forecasts.\n• Never share passwords, recovery phrases, or payment details.",
-  "about": "<b>About this demo</b>\n\nMagnit is a fictional paper-trading interface for exploring Telegram bot navigation and a virtual portfolio. It is not a broker, exchange, or offer to invest.",
-  "help": "Use /start for the menu. Open a demo position, then close it with a hypothetical -10%, 0%, or +10% scenario. Every amount is virtual.",
-  "opened_list": "Open demo positions:",
-  "closed_list": "No activity yet.",
-  "lang": "Language set to English.",
-  "open": "Open demo", "portfolio_btn": "Portfolio", "history_btn": "Activity",
-  "plans_btn": "Demo plans", "risk_btn": "Risk notes", "about_btn": "About", "help_btn": "Help",
-  "back": "← Menu", "close": "Close", "scenario": "Choose a hypothetical demo scenario:",
-  "close_btn": "Close position", "scenario_minus": "−10%", "scenario_zero": "0%", "scenario_plus": "+10%",
-  "lang_btn": "Русский / English", "no_position": "That demo position is not open."
+  "welcome": (
+      "╔══════════════════════╗\n"
+      "║   🧲 <b>MAGNIT DEMO</b>   ║\n"
+      "║   Paper Trading      ║\n"
+      "╚══════════════════════╝\n\n"
+      "🎮 <b>Welcome to your virtual trading floor!</b>\n\n"
+      "💡 Explore a fictional portfolio using virtual credits.\n"
+      "⚠️ No real money, deposits, or trading involved."
+  ),
+  "menu": "📋 <b>What would you like to do?</b>",
+  "balance": "💰 Virtual Balance",
+  "invested": "📊 In Open Demos",
+  "portfolio": "📁 Portfolio",
+  "plans": "🎯 <b>Choose Your Demo Plan</b>\n\nSelect a plan to open a virtual position.\nAll amounts are fictional credits — no real trades.",
+  "opened": "✅ <b>Position Opened!</b>\n\n🎯 Plan: <b>{plan}</b>\n💳 Amount: <b>{amount:,} credits</b>\n\n📝 This is a demo only. No real trade was placed.",
+  "insufficient": "❌ <b>Insufficient Credits</b>\n\nYou don't have enough virtual credits for this plan.\nClose an existing position first or choose a smaller plan.",
+  "empty": "📭 <b>No Open Positions</b>\n\nYour portfolio is empty. Start by opening a demo position!",
+  "portfolio_title": "📁 <b>Your Demo Portfolio</b>",
+  "history_title": "📜 <b>Recent Activity</b>",
+  "closed": "🔒 <b>Position Closed</b>\n\n🆔 ID: #{id}\n📊 Scenario: <b>{pct:+d}%</b>\n💱 Virtual Change: <b>{change:+,} credits</b>",
+  "risk": "⚠️ <b>Risk Disclaimer</b>\n\n• Markets can move against you\n• Past results ≠ future results\n• This is invented demo data\n• Never share passwords or payment details",
+  "about": "ℹ️ <b>About Magnit</b>\n\nMagnit is a fictional paper-trading interface for exploring Telegram bot navigation and virtual portfolios.\n\n🚫 Not a broker\n🚫 Not an exchange\n🚫 Not an investment offer",
+  "help": "🆘 <b>How to Use</b>\n\n1️⃣ /start — Open main menu\n2️⃣ Choose a demo plan\n3️⃣ Close with -10%, 0%, or +10% scenario\n\nAll amounts are virtual credits.",
+  "opened_list": "📂 <b>Your Open Positions:</b>",
+  "closed_list": "📭 No activity yet.",
+  "lang": "✅ Language set to English 🇬🇧",
+  "open": "🚀 Open Demo",
+  "portfolio_btn": "📁 Portfolio",
+  "history_btn": "📜 Activity",
+  "plans_btn": "🎯 Plans",
+  "risk_btn": "⚠️ Risk Notes",
+  "about_btn": "ℹ️ About",
+  "help_btn": "🆘 Help",
+  "back": "◀️ Menu",
+  "close": "🔒 Close",
+  "scenario": "🎲 <b>Choose Scenario</b>\n\nPick a hypothetical outcome for closing:",
+  "close_btn": "🔒 Close Position",
+  "scenario_minus": "📉 −10%",
+  "scenario_zero": "➡️ 0%",
+  "scenario_plus": "📈 +10%",
+  "lang_btn": "🌐 Русский / English",
+  "no_position": "❌ This position is not open or doesn't exist."
  },
  "ru": {
-  "welcome": "<b>МАГНИТ | ДЕМО-СИМУЛЯТОР</b>\n\nИзучайте вымышленный портфель на виртуальных кредитах. Реальных денег, пополнений, выводов, сделок и доходности здесь нет.",
-  "menu": "Выберите экран демо:",
-  "balance": "Виртуальный баланс", "invested": "В открытых демо-сделках", "portfolio": "Портфель",
-  "plans": "<b>Выберите размер демо-сделки</b>\n\nКредиты переместятся в виртуальный портфель. Реальная сделка не совершается.",
-  "opened": "Демо-позиция открыта: <b>{plan}</b>, {amount:,} кредитов. Реальная сделка не совершалась.",
-  "insufficient": "Недостаточно виртуальных кредитов. Сначала закройте открытую демо-позицию.",
-  "empty": "Открытых демо-позиций пока нет. Выберите размер демо-сделки.",
-  "portfolio_title": "<b>Ваш демо-портфель</b>",
-  "history_title": "<b>Демо-операции</b>",
-  "closed": "Демо-позиция №{id} закрыта со сценарием {pct:+d}%. Виртуальное изменение: {change:+,} кредитов.",
-  "risk": "<b>О рисках</b>\n\n• Рынок может двигаться против вас, вплоть до полной потери суммы.\n• Прошлые результаты не предсказывают будущие.\n• Здесь вымышленные данные, бот не делает прогнозов.\n• Не отправляйте пароли, фразы восстановления и платёжные данные.",
-  "about": "<b>О демо</b>\n\nМагнит — вымышленный интерфейс для знакомства с Telegram-ботом и виртуальным портфелем. Это не брокер, не биржа и не предложение инвестировать.",
-  "help": "Команда /start открывает меню. Откройте демо-позицию и закройте её гипотетическим сценарием −10%, 0% или +10%. Все суммы виртуальные.",
-  "opened_list": "Открытые демо-позиции:",
-  "closed_list": "Операций пока нет.",
-  "lang": "Язык изменён на русский.",
-  "open": "Открыть демо", "portfolio_btn": "Портфель", "history_btn": "Операции",
-  "plans_btn": "Размер демо", "risk_btn": "О рисках", "about_btn": "О проекте", "help_btn": "Помощь",
-  "back": "← Меню", "close": "Закрыть", "scenario": "Выберите гипотетический демо-сценарий:",
-  "close_btn": "Закрыть позицию", "scenario_minus": "−10%", "scenario_zero": "0%", "scenario_plus": "+10%",
-  "lang_btn": "Русский / English", "no_position": "Эта демо-позиция уже закрыта или не существует."
+  "welcome": (
+      "╔══════════════════════╗\n"
+      "║   🧲 <b>МАГНИТ ДЕМО</b>   ║\n"
+      "║   Торговый Симулятор ║\n"
+      "╚══════════════════════╝\n\n"
+      "🎮 <b>Добро пожаловать на виртуальную торговую площадку!</b>\n\n"
+      "💡 Изучайте вымышленный портфель на виртуальных кредитах.\n"
+      "⚠️ Реальных денег, сделок и инвестиций здесь нет."
+  ),
+  "menu": "📋 <b>Что хотите сделать?</b>",
+  "balance": "💰 Виртуальный баланс",
+  "invested": "📊 В открытых позициях",
+  "portfolio": "📁 Портфель",
+  "plans": "🎯 <b>Выберите Демо-План</b>\n\nОткройте виртуальную позицию.\nВсе суммы — вымышленные кредиты, реальных сделок нет.",
+  "opened": "✅ <b>Позиция Открыта!</b>\n\n🎯 План: <b>{plan}</b>\n💳 Сумма: <b>{amount:,} кредитов</b>\n\n📝 Это только демо. Реальная сделка не совершалась.",
+  "insufficient": "❌ <b>Недостаточно Кредитов</b>\n\nУ вас не хватает виртуальных кредитов.\nЗакройте существующую позицию или выберите план поменьше.",
+  "empty": "📭 <b>Нет Открытых Позиций</b>\n\nВаш портфель пуст. Начните с открытия демо-позиции!",
+  "portfolio_title": "📁 <b>Ваш Демо-Портфель</b>",
+  "history_title": "📜 <b>Последние Операции</b>",
+  "closed": "🔒 <b>Позиция Закрыта</b>\n\n🆔 ID: #{id}\n📊 Сценарий: <b>{pct:+d}%</b>\n💱 Вирт. изменение: <b>{change:+,} кредитов</b>",
+  "risk": "⚠️ <b>О Рисках</b>\n\n• Рынок может идти против вас\n• Прошлые результаты ≠ будущие\n• Здесь вымышленные данные\n• Не передавайте пароли и платежные данные",
+  "about": "ℹ️ <b>О Магните</b>\n\nМагнит — вымышленный интерфейс для знакомства с Telegram-ботами и виртуальными портфелями.\n\n🚫 Не брокер\n🚫 Не биржа\n🚫 Не инвест-предложение",
+  "help": "🆘 <b>Как Использовать</b>\n\n1️⃣ /start — Главное меню\n2️⃣ Выберите демо-план\n3️⃣ Закройте со сценарием -10%, 0% или +10%\n\nВсе суммы виртуальные.",
+  "opened_list": "📂 <b>Ваши Открытые Позиции:</b>",
+  "closed_list": "📭 Операций пока нет.",
+  "lang": "✅ Язык изменён на русский 🇷🇺",
+  "open": "🚀 Открыть Демо",
+  "portfolio_btn": "📁 Портфель",
+  "history_btn": "📜 Операции",
+  "plans_btn": "🎯 Планы",
+  "risk_btn": "⚠️ О Рисках",
+  "about_btn": "ℹ️ О Проекте",
+  "help_btn": "🆘 Помощь",
+  "back": "◀️ Меню",
+  "close": "🔒 Закрыть",
+  "scenario": "🎲 <b>Выберите Сценарий</b>\n\nГипотетический исход закрытия:",
+  "close_btn": "🔒 Закрыть Позицию",
+  "scenario_minus": "📉 −10%",
+  "scenario_zero": "➡️ 0%",
+  "scenario_plus": "📈 +10%",
+  "lang_btn": "🌐 Русский / English",
+  "no_position": "❌ Эта позиция не открыта или не существует."
  }
 }
 
@@ -149,10 +191,14 @@ def show_dashboard(chat_id, uid):
     u = user(uid)
     invested = db().execute("SELECT COALESCE(SUM(amount),0) FROM positions WHERE uid=? AND closed IS NULL", (uid,)).fetchone()[0]
     t = TEXT[lang(uid)]
-    send(chat_id, "<b>MAGNIT | DEMO</b>\n\n"
-         + html.escape(t["balance"]) + ": <b>%s credits</b>\n" % format(u["balance"], ",")
-         + html.escape(t["invested"]) + ": <b>%s credits</b>\n\n" % format(invested, ",")
-         + "All figures are virtual. No real funds or trading.", menu_markup(uid))
+    send(chat_id, (
+        "╔══════════════════════╗\n"
+        "║   🧲 <b>MAGNIT DEMO</b>   ║\n"
+        "╚══════════════════════╝\n\n"
+        f"{t['balance']}: <b>{u['balance']:,} credits</b>\n"
+        f"{t['invested']}: <b>{invested:,} credits</b>\n\n"
+        "💡 All figures are virtual. No real funds."
+    ), menu_markup(uid))
 
 def show_plans(chat_id, uid):
     t = TEXT[lang(uid)]
@@ -230,10 +276,10 @@ def show_history(chat_id, uid):
         stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(e["created"]))
         if e["kind"] == "opened":
             p = db().execute("SELECT plan,amount FROM positions WHERE id=?", (int(e["detail"]),)).fetchone()
-            label = f"Opened demo #{e['detail']}: {p['plan']} · {p['amount']:,} credits" if p else f"Opened demo #{e['detail']}"
+            label = f"🟢 Opened #{e['detail']}: {p['plan']} · {p['amount']:,} credits" if p else f"🟢 Opened #{e['detail']}"
         else:
             pid, pct, change = e["detail"].split(":")
-            label = f"Closed demo #{pid}: hypothetical {int(pct):+d}% · {int(change):+,} credits"
+            label = f"🔴 Closed #{pid}: {int(pct):+d}% · {int(change):+,} credits"
         lines.append(html.escape(stamp + " · " + label))
     send(chat_id, say(uid, "history_title") + "\n\n" + "\n".join(lines), menu_markup(uid))
 
