@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Magnit paper-trading demo. Standard library only; no real funds or exchange."""
+import argparse
 import html
 import json
 import os
@@ -12,8 +13,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = {}
+_parser = argparse.ArgumentParser(description="Magnit bot")
+_parser.add_argument("--config", default=os.path.join(HERE, "config.json"))
+_args, _ = _parser.parse_known_args()
 try:
-    with open(os.path.join(HERE, "config.json"), encoding="utf-8") as f:
+    with open(_args.config, encoding="utf-8") as f:
         CFG = json.load(f)
 except (OSError, ValueError):
     pass
@@ -26,7 +30,8 @@ try:
 except (ValueError, TypeError):
     HEALTH_PORT = 0
 API = "https://api.telegram.org/bot" + TOKEN + "/"
-STATE = {"started": time.time(), "last_update": 0, "last_poll": 0, "updates": 0, "username": "", "ok": False}
+STATE = {"started": time.time(), "last_update": 0, "last_poll": 0, "updates": 0, "username": "", "ok": False,
+         "replies": 0, "last_reply": 0, "last_error": ""}
 LOCAL = threading.local()
 SEED = 10000
 PLANS = {100: "🌟 Starter", 500: "🚀 Explorer", 1000: "💎 Strategist"}
@@ -169,7 +174,14 @@ def api(method, payload):
     try:
         with urllib.request.urlopen(req, timeout=45) as response:
             result = json.loads(response.read(2_000_000))
+    except urllib.error.HTTPError as exc:
+        STATE["last_error"] = method + ":HTTP_" + str(exc.code)
+        print("Telegram HTTP error:", method, exc.code, flush=True)
+        if exc.code == 409:
+            print("Another process or webhook is consuming this bot's updates.", flush=True)
+        return None
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        STATE["last_error"] = method + ":" + type(exc).__name__
         print("Telegram request failed:", method, type(exc).__name__, flush=True)
         return None
     if not result.get("ok"):
@@ -182,7 +194,11 @@ def send(chat_id, body, markup=None):
                "link_preview_options": {"is_disabled": True}}
     if markup:
         payload["reply_markup"] = markup
-    api("sendMessage", payload)
+    result = api("sendMessage", payload)
+    if isinstance(result, dict) and result.get("message_id"):
+        STATE["replies"] += 1
+        STATE["last_reply"] = time.time()
+    return result
 
 def home(chat_id, uid):
     send(chat_id, say(uid, "welcome") + "\n\n" + say(uid, "menu"), menu_markup(uid))
@@ -353,12 +369,21 @@ def set_offset(value):
 
 class Health(BaseHTTPRequestHandler):
     def do_GET(self):
-        body = {"ok": STATE["ok"], "bot": STATE["username"], "uptime_sec": round(time.time()-STATE["started"]),
+        connection = db()
+        try:
+            demo_users = connection.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        finally:
+            connection.close()
+            del LOCAL.conn
+        healthy = bool(STATE["ok"] and STATE["last_poll"] and time.time() - STATE["last_poll"] < 90)
+        body = {"ok": healthy, "revision": CFG.get("revision", ""),
+                "replies": STATE["replies"], "last_reply": STATE["last_reply"],
+                "last_error": STATE["last_error"], "bot": STATE["username"], "uptime_sec": round(time.time()-STATE["started"]),
                 "last_poll_ago": round(time.time()-STATE["last_poll"]) if STATE["last_poll"] else None,
                 "updates": STATE["updates"],
-                "demo_users": db().execute("SELECT COUNT(*) FROM users").fetchone()[0]}
+                "demo_users": demo_users}
         data = json.dumps(body).encode()
-        self.send_response(200 if STATE["ok"] else 503)
+        self.send_response(200 if healthy else 503)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -374,7 +399,7 @@ def main():
         raise SystemExit("Telegram getMe failed. Check the bot token and network.")
     STATE["username"] = me.get("username", "")
     if EXPECTED and STATE["username"].lower() != EXPECTED.lower():
-        print(f"Warning: token belongs to @{STATE['username']}, expected @{EXPECTED}.", flush=True)
+        raise SystemExit("Token belongs to a different bot. Configuration was not accepted.")
     STATE["ok"] = True
     print(f"Magnit demo started as @{STATE['username']}. Virtual-only mode.", flush=True)
     if HEALTH_PORT:
@@ -392,6 +417,7 @@ def main():
             time.sleep(3)
             continue
         STATE["ok"] = True
+        STATE["last_error"] = ""
         for item in updates:
             try:
                 handle(item)
