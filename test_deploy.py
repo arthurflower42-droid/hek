@@ -1,5 +1,8 @@
 import importlib.util
 import os
+import io
+import json
+import urllib.error
 from pathlib import Path
 import subprocess
 import tempfile
@@ -10,6 +13,33 @@ spec=importlib.util.spec_from_file_location('installer',Path(__file__).parent/'d
 installer=importlib.util.module_from_spec(spec);spec.loader.exec_module(installer)
 
 class Deployment(unittest.TestCase):
+    def test_config_input_accepts_windows_utf8_bom(self):
+        source=io.TextIOWrapper(io.BytesIO(bytes([239,187,191])+b'{"token":"fixture"}'),encoding='utf-8')
+        self.assertEqual(installer.read_settings(source),{'token':'fixture'})
+    def test_config_input_errors_do_not_echo_input(self):
+        for raw,stage in [('', 'CONFIG_INPUT_EMPTY'),('private-input','CONFIG_INPUT_JSON'),('[]','CONFIG_INPUT_TYPE')]:
+            with self.subTest(stage=stage),self.assertRaises(RuntimeError) as caught:
+                installer.read_settings(io.StringIO(raw))
+            self.assertIn(stage,str(caught.exception))
+            self.assertNotIn('private-input',str(caught.exception))
+    def test_telegram_bad_json_retries_then_recovers(self):
+        bad=io.BytesIO(b'<html>temporary response</html>')
+        good=io.BytesIO(json.dumps({'ok':True,'result':{'username':'MagnitWaveBot'}}).encode())
+        with patch.object(installer.urllib.request,'urlopen',side_effect=[bad,good]) as request,patch.object(installer.time,'sleep'),patch('sys.stdout',new_callable=io.StringIO):
+            result=installer.telegram_result('fixture','getMe')
+        self.assertEqual(result['username'],'MagnitWaveBot')
+        self.assertEqual(request.call_count,2)
+    def test_telegram_bad_json_has_clear_stage_without_url(self):
+        with patch.object(installer.urllib.request,'urlopen',side_effect=lambda *a,**k:io.BytesIO(b'not-json')),patch.object(installer.time,'sleep'),patch('sys.stdout',new_callable=io.StringIO):
+            with self.assertRaisesRegex(RuntimeError,'TELEGRAM_RESPONSE_JSON: getMe') as caught:
+                installer.telegram_result('private-input','getMe')
+        self.assertNotIn('private-input',str(caught.exception))
+    def test_invalid_token_http_does_not_retry(self):
+        error=urllib.error.HTTPError('https://example.invalid/private-input',401,'Unauthorized',{},None)
+        with patch.object(installer.urllib.request,'urlopen',side_effect=error) as request,patch.object(installer.time,'sleep'):
+            with self.assertRaisesRegex(RuntimeError,'TELEGRAM_HTTP: getMe returned 401'):
+                installer.telegram_result('fixture','getMe')
+        self.assertEqual(request.call_count,1)
     @unittest.skipUnless(os.name == 'posix', 'Linux deployment check')
     def test_hook_is_valid_shell(self):
         result=subprocess.run(['bash','-n'],input=installer.HOOK,text=True,capture_output=True)

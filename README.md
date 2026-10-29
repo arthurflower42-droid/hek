@@ -48,3 +48,13 @@ The selected application remains the Magnit virtual portfolio in `bot.py`.
 Validation: `python3 -m unittest -q`, `python3 deploy/scan.py .`, and Python compilation.
 The Windows package supports `MAGNIT_CHECK_ONLY=1` for checksum, extraction, and SSH checks
 without collecting a token or changing the server.
+
+## JSON installation repair
+
+The installer now consumes the SSH configuration before spawning tests or tools.
+Windows sends explicit UTF-8 bytes, and the server accepts an optional UTF-8 BOM.
+Tests run with no access to the configuration input. `CONFIG_INPUT_OK` confirms
+that the server received a JSON object. Empty input, invalid JSON, saved config
+errors, Telegram HTTP failures, and invalid Telegram JSON have separate messages.
+Temporary Telegram failures are retried up to three times; HTTP 401 is rejected
+immediately. Seventeen checks cover these cases and the previous bot flows.

@@ -14,6 +14,7 @@ import tarfile
 import tempfile
 import time
 import urllib.request
+import urllib.error
 
 ROOT=Path('/opt/magnit')
 DATA=Path('/var/lib/magnit')
@@ -60,21 +61,54 @@ def select(path):
     tmp.unlink(missing_ok=True)
     tmp.symlink_to(path)
     os.replace(tmp,ROOT/'current')
+
+def read_settings(stream):
+    raw=stream.buffer.read() if hasattr(stream,'buffer') else stream.read()
+    if isinstance(raw,bytes):
+        try:raw=raw.decode('utf-8-sig')
+        except UnicodeError:raise RuntimeError('CONFIG_INPUT_ENCODING: expected UTF-8 JSON') from None
+    raw=raw.lstrip('\ufeff')
+    if not raw.strip():
+        raise RuntimeError('CONFIG_INPUT_EMPTY: Windows sent no configuration')
+    try:settings=json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError('CONFIG_INPUT_JSON: invalid JSON at position '+str(exc.pos)) from None
+    if not isinstance(settings,dict):
+        raise RuntimeError('CONFIG_INPUT_TYPE: expected a JSON object')
+    return settings
+
+def telegram_result(token,method):
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen('https://api.telegram.org/bot'+token+'/'+method,timeout=20) as response:
+                raw=response.read(2_000_000)
+            try:body=json.loads(raw)
+            except (ValueError,UnicodeError):
+                raise RuntimeError('TELEGRAM_RESPONSE_JSON: '+method+' returned invalid JSON') from None
+            if not isinstance(body,dict) or not body.get('ok') or 'result' not in body:
+                raise RuntimeError('TELEGRAM_RESPONSE_INVALID: '+method+' did not confirm success')
+            return body['result']
+        except urllib.error.HTTPError as exc:
+            if exc.code < 500 and exc.code != 429:
+                raise RuntimeError('TELEGRAM_HTTP: '+method+' returned '+str(exc.code)) from None
+            failure='TELEGRAM_HTTP: '+method+' returned '+str(exc.code)
+        except (urllib.error.URLError,TimeoutError,OSError):
+            failure='TELEGRAM_NETWORK: '+method+' could not be reached'
+        except RuntimeError as exc:
+            failure=str(exc)
+        if attempt < 2:
+            print(failure+'; retrying',flush=True)
+            time.sleep(2*(attempt+1))
+    raise RuntimeError(failure)
+
 def verify(config):
     # Credentials never appear in command arguments, diagnostics or git.
     token=config.get('token','')
     if not re.fullmatch(r'[0-9]{5,16}:[A-Za-z0-9_-]{30,100}',token):
         raise RuntimeError('Invalid Telegram token format')
-    def api(method):
-        url='https://api.telegram.org/bot'+token+'/'+method
-        with urllib.request.urlopen(url,timeout=20) as response:
-            body=json.load(response)
-        if not body.get('ok'):
-            raise RuntimeError('Telegram verification failed')
-        return body['result']
-    if api('getMe').get('username','').lower()!='magnitwavebot':
+    if telegram_result(token,'getMe').get('username','').lower()!='magnitwavebot':
         raise RuntimeError('Token must belong to MagnitWaveBot')
-    if api('getWebhookInfo').get('url'):
+    if telegram_result(token,'getWebhookInfo').get('url'):
         raise RuntimeError('Bot already has a webhook. Existing configuration was preserved.')
     if config.get('openai_key'):
         request=urllib.request.Request('https://api.openai.com/v1/models/'+config.get('openai_model','gpt-5-mini'),
@@ -85,15 +119,21 @@ def verify(config):
 def main():
     if os.name != 'posix':raise RuntimeError('Server installer requires Linux')
     if os.geteuid()!=0:raise RuntimeError('Use sudo -n python3')
+    # Consume the SSH payload before starting children; never let tests read it.
+    supplied={} if '--existing' in sys.argv else read_settings(sys.stdin)
+    print('CONFIG_INPUT_OK',flush=True)
     ROOT.mkdir(parents=True,exist_ok=True)
     with (ROOT/'deploy.lock').open('w') as lock:
         print('Waiting for deployment lock...',flush=True)
         fcntl.flock(lock,fcntl.LOCK_EX)
         revision=git('rev-parse','HEAD')
-        run(sys.executable,'-m','unittest','-q',cwd=SOURCE)
-        run(sys.executable,str(SOURCE/'deploy/scan.py'),str(SOURCE))
-        existing=json.loads(CONFIG.read_text()) if CONFIG.exists() else {}
-        supplied={} if '--existing' in sys.argv else json.load(sys.stdin)
+        run(sys.executable,'-m','unittest','-q',cwd=SOURCE,stdin=subprocess.DEVNULL)
+        run(sys.executable,str(SOURCE/'deploy/scan.py'),str(SOURCE),stdin=subprocess.DEVNULL)
+        if CONFIG.exists():
+            try:existing=json.loads(CONFIG.read_text(encoding='utf-8-sig'))
+            except (UnicodeError,json.JSONDecodeError):
+                raise RuntimeError('CONFIG_EXISTING_JSON: saved server configuration is invalid') from None
+        else:existing={}
         config={**existing,**supplied,'database':str(DATA/'magnit.sqlite3'),
                 'revision':revision,'expected_username':'MagnitWaveBot','health_port':8769}
         verify(config)

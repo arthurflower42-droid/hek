@@ -23,8 +23,10 @@ function Remote([string]$Command, [string]$InputText = '') {
     if (-not $proc.Start()) { throw 'Не удалось запустить SSH.' }
     $stdout = $proc.StandardOutput.ReadToEndAsync()
     $stderr = $proc.StandardError.ReadToEndAsync()
-    $proc.StandardInput.WriteLine($InputText)
-    $proc.StandardInput.Close()
+    $inputBytes = [Text.Encoding]::UTF8.GetBytes($InputText + "`n")
+    $proc.StandardInput.BaseStream.Write($inputBytes, 0, $inputBytes.Length)
+    $proc.StandardInput.BaseStream.Flush()
+    $proc.StandardInput.BaseStream.Close()
     $timer = [Diagnostics.Stopwatch]::StartNew()
     while (-not $proc.WaitForExit(1000)) {
         if ($timer.Elapsed.TotalSeconds -gt 1200) {
@@ -91,6 +93,8 @@ try {
     Write-Host 'Проверяю тесты, делаю бэкап и запускаю МАГНИТ...' -ForegroundColor Green
     # Secret characters are ASCII. SSH receives the JSON only through stdin.
     $inputJson = $settings | ConvertTo-Json -Compress
+    if ([string]::IsNullOrWhiteSpace($inputJson) -or -not $inputJson.TrimStart().StartsWith('{')) { throw 'CONFIG_INPUT_EMPTY: configuration was not serialized.' }
+    $null = $inputJson | ConvertFrom-Json
     $result = Remote ('git clone --quiet --branch main ' + $remote + '/release.bundle ' + $remote + '/src && sudo -n python3 ' + $remote + '/src/deploy/install.py') $inputJson
     if ($result -notmatch 'DEPLOYED ([0-9a-f]{40})') { throw 'Сервер не подтвердил deployed.' }
     $deployed = $Matches[1]
