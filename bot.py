@@ -1,23 +1,18 @@
 #!/usr/bin/env python3
-"""МАГНИТ — образовательный Telegram-бот: на что смотреть, чтобы не потерять деньги
-на финансовых площадках.
+"""550D&A · Digital Algorithms — витринный Telegram-бот.
+Показывает экраны как на скринах, но функции не активны (демо-режим).
+Python 3.10+, только стандартная библиотека."""
 
-Настройки берутся из config.json рядом с ботом (token, expected_username,
-health_port, database); любое значение можно переопределить переменной окружения
-(TELEGRAM_BOT_TOKEN, HEALTH_PORT, DATABASE). Токен в лог и в текст ошибок не попадает.
-"""
 import json
 import os
 import sqlite3
 import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-
 
 def load_config():
     cfg = {}
@@ -35,35 +30,68 @@ def load_config():
         cfg["health_port"] = 0
     return cfg
 
-
 CFG = load_config()
 TOKEN = CFG["token"]
 API = "https://api.telegram.org/bot" + TOKEN + "/"
 DB_PATH = CFG["database"] if os.path.isabs(CFG["database"]) else os.path.join(HERE, CFG["database"])
 
-# Живое состояние для health-эндпоинта.
 STATE = {"started": time.time(), "last_update": 0.0, "last_poll": 0.0, "updates": 0, "username": "", "ok": False}
 
-MECHANISMS = [
-    ("reported", "Показанная доходность",
-     "На экране рисуют прибыль, которой может не быть на самом деле. Это подталкивает вносить всё больше."),
-    ("payouts", "Выплаты за счёт новых вкладов",
-     "Деньги новых вкладчиков идут на выплаты прежним — создаётся видимость прибыльного бизнеса. Это признак пирамиды."),
-    ("withdrawals", "Платежи перед выводом",
-     "Перед выводом просят доплатить «налог», «проверку» или «разблокировку». Эти деньги, как правило, тоже не возвращаются."),
-    ("fees", "Комиссии и цена сделки",
-     "Скрытые сборы и невыгодная цена исполнения незаметно перекладывают ваши деньги оператору."),
-    ("referrals", "Заработок на приглашённых",
-     "Промоутеры получают процент за новых вкладчиков — независимо от того, заработают те или потеряют."),
-    ("volume", "Поощрение частых сделок",
-     "Оператор зарабатывает на комиссии с оборота, поэтому подталкивает торговать чаще — даже когда вы в минусе."),
-    ("positions", "Ставка против клиента",
-     "Часть дилеров зарабатывает на ваших убытках по позициям, которые держит у себя. При лицензии и честном раскрытии это законно; скрытая манипуляция — отдельная проблема."),
-    ("closure", "Остановка выплат",
-     "Собирают вклады, а потом ограничивают вывод или просто закрываются."),
-]
-BY_ID = {row[0]: row for row in MECHANISMS}
+DEMO_NOTE = "\n\n<i>Демо-режим: витрина для показа. Функции не активны, средства не принимаются.</i>"
 
+# Тексты для экранов (как на скринах)
+WELCOME_TEXT = (
+    "<b>Welcome to Digital Algorithms!</b>\n\n"
+    "🚀 Congratulations! You have successfully registered and become part of our international community!\n\n"
+    "🇦🇺 Digital Algorithms is an Australian technology company specializing in automated trading "
+    "in financial markets using intelligent trading algorithms.\n\n"
+    "🇦🇺 Our company is officially registered in Australia, and our registration documents are available for verification.\n\n"
+    "📄 <b>Want to Learn More?</b>\n"
+    "In the \"About Us\" section, you will find detailed information about our company, technologies, and how our system operates.\n\n"
+    "📊 We also recommend exploring the Digital Algorithms Presentation, which provides a detailed overview "
+    "of our business model and the opportunities offered by our platform.\n\n"
+    "❤️ Thank you for your trust! We're delighted to welcome you to Digital Algorithms!\n\n"
+    "<i>Digital Algorithms Team</i>"
+)
+
+DASHBOARD_TEXT = (
+    "<b>550D&A</b>\n\n"
+    "Choose an action below or open the dashboard.\n\n"
+    "<b>Total, = USDT</b>    0.00 USDT\n"
+    "<b>Available</b>        0.00 USDT\n"
+    "<b>In deposits</b>      0.00 USDT\n"
+    "<b>Estimated income</b> 0.00 USDT"
+)
+
+ABOUT_TEXT = (
+    "<b>About Digital Algorithms</b>\n\n"
+    "Digital Algorithms is an Australian technology company specializing in automated trading "
+    "in financial markets using intelligent trading algorithms.\n\n"
+    "Our company is officially registered in Australia, and our registration documents are available for verification.\n\n"
+    "We develop cutting-edge algorithmic trading systems that operate 24/7 across global financial markets, "
+    "using advanced mathematical models and machine learning to identify profitable opportunities."
+)
+
+PRESENTATION_TEXT = (
+    "<b>Digital Algorithms Presentation</b>\n\n"
+    "📊 Our business model combines automated trading algorithms with a user-friendly platform "
+    "that allows investors to participate in algorithmic trading without technical expertise.\n\n"
+    "Key features:\n"
+    "• Automated trading 24/7\n"
+    "• Risk management systems\n"
+    "• Transparent reporting\n"
+    "• Multi-asset strategies\n\n"
+    "Contact our team for a detailed presentation."
+)
+
+HELP_TEXT = (
+    "<b>Help & Support</b>\n\n"
+    "For assistance, please contact our support team:\n"
+    "• Email: support@digitalalgorithms.com\n"
+    "• Live chat available in your dashboard\n"
+    "• FAQ section coming soon\n\n"
+    "Our team is available 24/7 to assist you."
+)
 
 def call(method, payload):
     request = urllib.request.Request(
@@ -78,10 +106,8 @@ def call(method, payload):
         return None
     return result.get("result") if result.get("ok") else None
 
-
-# ---------------------------------------------------------------- база (sqlite)
+# База данных (лёгкая статистика)
 _LOCAL = threading.local()
-
 
 def db():
     conn = getattr(_LOCAL, "conn", None)
@@ -94,7 +120,6 @@ def db():
         conn.commit()
     return conn
 
-
 def seen(uid):
     now = time.time()
     c = db()
@@ -102,12 +127,10 @@ def seen(uid):
               "ON CONFLICT(uid) DO UPDATE SET last_ts=?, hits=hits+1", (uid, now, now, now))
     c.commit()
 
-
 def click(key):
     c = db()
     c.execute("INSERT INTO clicks(key, n) VALUES(?,1) ON CONFLICT(key) DO UPDATE SET n=n+1", (key,))
     c.commit()
-
 
 def get_offset():
     try:
@@ -116,12 +139,10 @@ def get_offset():
     except (sqlite3.Error, ValueError):
         return 0
 
-
 def set_offset(val):
     c = db()
     c.execute("INSERT INTO kv(k, v) VALUES('offset', ?) ON CONFLICT(k) DO UPDATE SET v=?", (str(val), str(val)))
     c.commit()
-
 
 def stats():
     try:
@@ -132,41 +153,32 @@ def stats():
     except sqlite3.Error:
         return {"users": 0, "hits": 0}
 
+# Клавиатуры
+def main_keyboard():
+    return {
+        "inline_keyboard": [
+            [{"text": "📊 Open deposit", "callback_data": "deposit"}],
+            [{"text": "⬆ Top up", "callback_data": "topup"}, {"text": "⬇ Withdraw", "callback_data": "withdraw"}],
+            [{"text": "📋 My deposits", "callback_data": "my_deposits"}, {"text": "💰 Balance", "callback_data": "balance"}],
+            [{"text": "🔄 Reinvest", "callback_data": "reinvest"}],
+            [{"text": "👥 Team", "callback_data": "team"}, {"text": "📜 History", "callback_data": "history"}],
+            [{"text": "❓ Help", "callback_data": "help"}, {"text": "🌐 Language", "callback_data": "language"}],
+            [{"text": "📄 Presentation", "callback_data": "presentation"}],
+            [{"text": "🔗 Open dashboard", "url": "https://t.me/MagnitWaveBot"}],
+        ]
+    }
 
-# ---------------------------------------------------------------- тексты и меню
-def keyboard():
-    rows = []
-    for start in range(0, len(MECHANISMS), 2):
-        rows.append([{"text": MECHANISMS[i][1], "callback_data": "m:" + MECHANISMS[i][0]}
-                     for i in range(start, min(start + 2, len(MECHANISMS)))])
-    rows.append([{"text": "⚠ Памятка безопасности", "callback_data": "safety"}])
-    return {"inline_keyboard": rows}
+def welcome_keyboard():
+    return {
+        "inline_keyboard": [
+            [{"text": "📊 Open dashboard", "callback_data": "dashboard"}],
+            [{"text": "📄 About Us", "callback_data": "about"}, {"text": "📊 Presentation", "callback_data": "presentation"}],
+            [{"text": "❓ Help", "callback_data": "help"}],
+        ]
+    }
 
-
-def home():
-    return (
-        "<b>Как площадки зарабатывают на вкладчиках</b>\n\n"
-        "Здесь — простым языком о том, как некоторые платформы делают деньги и на что стоит "
-        "обращать внимание. Это признаки риска, а не доказательство, что конкретная компания — мошенники.\n\n"
-        "Выберите, о чём рассказать подробнее:"
-    )
-
-
-def safety():
-    return (
-        "<b>Перед тем как отправить деньги</b>\n\n"
-        "• Проверьте компанию и её лицензию у финансового регулятора.\n"
-        "• Убедитесь, что вывод работает без дополнительных платежей за «разблокировку» или «налог».\n"
-        "• Гарантированная доходность и давление «приведи друзей» — тревожные признаки.\n"
-        "• Самостоятельно сверяйте выписки и историю сделок.\n"
-        "• Никому не сообщайте пароли, seed-фразы и не давайте удалённый доступ.\n\n"
-        "Если деньги уже под угрозой — срочно свяжитесь с банком или платёжной системой и сообщите своему регулятору."
-    )
-
-
-def back_row():
-    return [{"text": "← Все признаки", "callback_data": "home"}]
-
+def back_keyboard():
+    return {"inline_keyboard": [[{"text": "← Back to Dashboard", "callback_data": "dashboard"}]]}
 
 def send(chat_id, text, markup=None):
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
@@ -174,7 +186,6 @@ def send(chat_id, text, markup=None):
     if markup:
         payload["reply_markup"] = markup
     call("sendMessage", payload)
-
 
 def handle(update):
     if "callback_query" in update:
@@ -187,27 +198,52 @@ def handle(update):
         key = cb.get("data", "")
         seen((cb.get("from") or {}).get("id") or chat_id)
         click(key)
-        if key == "home":
-            send(chat_id, home(), keyboard())
-        elif key == "safety":
-            send(chat_id, safety(), {"inline_keyboard": [back_row()]})
-        elif key.startswith("m:") and key[2:] in BY_ID:
-            _, title, description = BY_ID[key[2:]]
-            send(chat_id, "<b>" + title + "</b>\n\n" + description,
-                 {"inline_keyboard": [back_row(), [{"text": "⚠ Памятка безопасности", "callback_data": "safety"}]]})
+        
+        if key == "dashboard":
+            send(chat_id, DASHBOARD_TEXT + DEMO_NOTE, main_keyboard())
+        elif key == "deposit":
+            send(chat_id, "<b>Open Deposit</b>\n\nChoose your investment plan:\n• Plan A: 10% monthly\n• Plan B: 15% monthly\n• Plan C: 20% monthly\n\n" + DEMO_NOTE, back_keyboard())
+        elif key == "topup":
+            send(chat_id, "<b>Top Up</b>\n\nSend USDT to the following address:\n<code>0x1234...5678</code>\n\n" + DEMO_NOTE, back_keyboard())
+        elif key == "withdraw":
+            send(chat_id, "<b>Withdraw</b>\n\nEnter the amount and your USDT address.\n\n" + DEMO_NOTE, back_keyboard())
+        elif key == "my_deposits":
+            send(chat_id, "<b>My Deposits</b>\n\nYou have no active deposits.\n\n" + DEMO_NOTE, back_keyboard())
+        elif key == "balance":
+            send(chat_id, "<b>Balance</b>\n\nTotal: 0.00 USDT\nAvailable: 0.00 USDT\nIn deposits: 0.00 USDT\n\n" + DEMO_NOTE, back_keyboard())
+        elif key == "reinvest":
+            send(chat_id, "<b>Reinvest</b>\n\nAutomatically reinvest your earnings for compound growth.\n\n" + DEMO_NOTE, back_keyboard())
+        elif key == "team":
+            send(chat_id, "<b>Team</b>\n\nYour referral link: https://t.me/MagnitWaveBot?start=ref123\nTeam size: 0\n\n" + DEMO_NOTE, back_keyboard())
+        elif key == "history":
+            send(chat_id, "<b>History</b>\n\nNo transactions yet.\n\n" + DEMO_NOTE, back_keyboard())
+        elif key == "help":
+            send(chat_id, HELP_TEXT + DEMO_NOTE, back_keyboard())
+        elif key == "language":
+            send(chat_id, "<b>Language</b>\n\nChoose your language:\n• English\n• Русский\n\n" + DEMO_NOTE, back_keyboard())
+        elif key == "presentation":
+            send(chat_id, PRESENTATION_TEXT + DEMO_NOTE, back_keyboard())
+        elif key == "about":
+            send(chat_id, ABOUT_TEXT + DEMO_NOTE, back_keyboard())
         return
+    
     message = update.get("message") or {}
     chat = message.get("chat") or {}
     if chat.get("type") != "private":
         return
     text = (message.get("text") or "").strip()
+    uid = (message.get("from") or {}).get("id") or chat.get("id")
+    
     if text.startswith(("/start", "/help", "/menu")):
-        seen((message.get("from") or {}).get("id") or chat.get("id"))
+        seen(uid)
         click("/start")
-        send(chat["id"], home(), keyboard())
+        send(chat["id"], WELCOME_TEXT, welcome_keyboard())
+    elif text.startswith("/dashboard"):
+        seen(uid)
+        click("/dashboard")
+        send(chat["id"], DASHBOARD_TEXT + DEMO_NOTE, main_keyboard())
 
-
-# ---------------------------------------------------------------- health-сервер
+# Health-сервер
 class Health(BaseHTTPRequestHandler):
     def do_GET(self):
         up = time.time() - STATE["started"]
@@ -230,7 +266,6 @@ class Health(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-
 def start_health(port):
     if not port:
         return
@@ -242,8 +277,6 @@ def start_health(port):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     print("health: слушаю 127.0.0.1:%d" % port)
 
-
-# ---------------------------------------------------------------- запуск
 def main():
     if not TOKEN:
         raise SystemExit("Нет токена: задайте token в config.json или TELEGRAM_BOT_TOKEN.")
@@ -275,11 +308,9 @@ def main():
             try:
                 handle(update)
             except Exception:
-                # Payload и URL не логируем: в URL Telegram лежит токен.
                 pass
         if updates:
             set_offset(offset)
-
 
 if __name__ == "__main__":
     main()
